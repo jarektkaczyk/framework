@@ -68,7 +68,7 @@ class AuthAccessGateTest extends TestCase
         unset($_SERVER['__laravel.testBefore']);
     }
 
-    public function test_policy_before_not_called_with_guests_if_it_doesnt_allow_them()
+    public function test_policy_before_rejects_guests_if_it_doesnt_allow_them()
     {
         $_SERVER['__laravel.testBefore'] = false;
 
@@ -78,7 +78,7 @@ class AuthAccessGateTest extends TestCase
 
         $gate->policy(AccessGateTestDummy::class, AccessGateTestPolicyWithNonGuestBefore::class);
 
-        $this->assertTrue($gate->check('edit', new AccessGateTestDummy));
+        $this->assertFalse($gate->check('edit', new AccessGateTestDummy));
         $this->assertFalse($gate->check('update', new AccessGateTestDummy));
         $this->assertFalse($_SERVER['__laravel.testBefore']);
 
@@ -116,7 +116,7 @@ class AuthAccessGateTest extends TestCase
             return true;
         });
 
-        $this->assertTrue($gate->check('foo'));
+        $this->assertFalse($gate->check('foo'));
 
         $this->assertTrue($_SERVER['__laravel.gateBefore']);
         $this->assertFalse($_SERVER['__laravel.gateBefore2']);
@@ -639,7 +639,7 @@ class AccessGateTestPolicyThatAllowsGuests
         return true;
     }
 
-    public function update($user, AccessGateTestDummy $dummy)
+    public function update(StdClass $user, AccessGateTestDummy $dummy)
     {
         return true;
     }
@@ -657,7 +657,7 @@ class AccessGateTestPolicyWithNonGuestBefore
         return true;
     }
 
-    public function update($user, AccessGateTestDummy $dummy)
+    public function update(StdClass $user, AccessGateTestDummy $dummy)
     {
         return true;
     }

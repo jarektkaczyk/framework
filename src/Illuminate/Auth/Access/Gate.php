@@ -2,9 +2,7 @@
 
 namespace Illuminate\Auth\Access;
 
-use Exception;
-use ReflectionClass;
-use ReflectionFunction;
+use TypeError;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
@@ -305,10 +303,7 @@ class Gate implements GateContract
      */
     protected function raw($ability, $arguments = [])
     {
-        if (! ($user = $this->resolveUser()) &&
-            ! $this->allowsGuests($ability, Arr::wrap($arguments))) {
-            return false;
-        }
+        $user = $this->resolveUser();
 
         $arguments = Arr::wrap($arguments);
 
@@ -334,109 +329,27 @@ class Gate implements GateContract
     }
 
     /**
-     * Determine if the given ability allows guests.
-     *
-     * @param  string  $ability
-     * @param  array  $arguments
-     * @return bool
-     */
-    protected function allowsGuests($ability, $arguments)
-    {
-        if (isset($arguments[0]) &&
-            ! is_null($policy = $this->getPolicyFor($arguments[0]))) {
-            return $this->policyAllowsGuests($policy, $ability, $arguments);
-        }
-
-        if (isset($this->abilities[$ability])) {
-            return $this->abilityAllowsGuests($ability, $arguments);
-        }
-
-        return false;
-    }
-
-    /**
-     * Determine if the given policy method allows guests.
-     *
-     * @param  string  $policy
-     * @param  string  $ability
-     * @param  array  $arguments
-     * @return bool
-     */
-    protected function policyAllowsGuests($policy, $ability, $arguments)
-    {
-        return $this->methodAllowsGuests(
-            $policy, $this->formatAbilityToMethod($ability)
-        );
-    }
-
-    /**
-     * Determine if the given class method allows guests.
-     *
-     * @param  string  $class
-     * @param  string  $method
-     * @return bool
-     */
-    protected function methodAllowsGuests($class, $method)
-    {
-        try {
-            $reflection = new ReflectionClass($class);
-
-            $method = $reflection->getMethod($method);
-        } catch (Exception $e) {
-            return false;
-        }
-
-        if ($method) {
-            $parameters = $method->getParameters();
-
-            return isset($parameters[0]) && $this->parameterAllowsGuests($parameters[0]);
-        }
-
-        return false;
-    }
-
-    /**
-     * Determine if the ability allows guests.
-     *
-     * @param  string  $ability
-     * @param  array  $arguments
-     * @return bool
-     */
-    protected function abilityAllowsGuests($ability, $arguments)
-    {
-        return $this->callbackAllowsGuests($this->abilities[$ability]);
-    }
-
-    /**
      * Determine if the callback allows guests.
      *
      * @param  callable  $callback
-     * @param  array  $arguments
+     * @param  mixed ...$arguments
      * @return bool
      */
-    protected function callbackAllowsGuests($callback)
+    protected function callbackAllowsGuests(callable $callback, ...$arguments)
     {
-        $parameters = (new ReflectionFunction($callback))->getParameters();
+        try {
+            $callback(null, ...$arguments);
+        } catch (TypeError $e) {
+            return false;
+        }
 
-        return isset($parameters[0]) && $this->parameterAllowsGuests($parameters[0]);
-    }
-
-    /**
-     * Determine if the given parameter allows guests.
-     *
-     * @param  \ReflectionParameter  $parameter
-     * @return bool
-     */
-    protected function parameterAllowsGuests($parameter)
-    {
-        return ($parameter->getClass() && $parameter->allowsNull()) ||
-               ($parameter->isDefaultValueAvailable() && is_null($parameter->getDefaultValue()));
+        return true;
     }
 
     /**
      * Resolve and call the appropriate authorization callback.
      *
-     * @param  \Illuminate\Contracts\Auth\Authenticatable  $user
+     * @param  \Illuminate\Contracts\Auth\Authenticatable|null  $user
      * @param  string  $ability
      * @param  array  $arguments
      * @return bool
@@ -445,13 +358,17 @@ class Gate implements GateContract
     {
         $callback = $this->resolveAuthCallback($user, $ability, $arguments);
 
+        if (is_null($user) && ! $this->callbackAllowsGuests($callback, ...$arguments)) {
+            return false;
+        }
+
         return $callback($user, ...$arguments);
     }
 
     /**
      * Call all of the before callbacks and return if a result is given.
      *
-     * @param  \Illuminate\Contracts\Auth\Authenticatable  $user
+     * @param  \Illuminate\Contracts\Auth\Authenticatable|null  $user
      * @param  string  $ability
      * @param  array  $arguments
      * @return bool|null
@@ -461,8 +378,8 @@ class Gate implements GateContract
         $arguments = array_merge([$user, $ability], [$arguments]);
 
         foreach ($this->beforeCallbacks as $before) {
-            if (is_null($user) && ! $this->callbackAllowsGuests($before)) {
-                continue;
+            if (is_null($user) && ! $this->callbackAllowsGuests($before, array_slice($arguments, 1))) {
+                return false;
             }
 
             if (! is_null($result = $before(...$arguments))) {
@@ -474,7 +391,7 @@ class Gate implements GateContract
     /**
      * Call all of the after callbacks with check result.
      *
-     * @param  \Illuminate\Contracts\Auth\Authenticatable  $user
+     * @param  \Illuminate\Contracts\Auth\Authenticatable|null  $user
      * @param  string  $ability
      * @param  array  $arguments
      * @param  bool  $result
@@ -485,7 +402,7 @@ class Gate implements GateContract
         $arguments = array_merge([$user, $ability, $result], [$arguments]);
 
         foreach ($this->afterCallbacks as $after) {
-            if (is_null($user) && ! $this->callbackAllowsGuests($after)) {
+            if (is_null($user) && ! $this->callbackAllowsGuests($after, array_slice($arguments, 1))) {
                 continue;
             }
 
@@ -496,7 +413,7 @@ class Gate implements GateContract
     /**
      * Resolve the callable for the given ability and arguments.
      *
-     * @param  \Illuminate\Contracts\Auth\Authenticatable  $user
+     * @param  \Illuminate\Contracts\Auth\Authenticatable|null  $user
      * @param  string  $ability
      * @param  array  $arguments
      * @return callable
@@ -559,7 +476,7 @@ class Gate implements GateContract
     /**
      * Resolve the callback for a policy check.
      *
-     * @param  \Illuminate\Contracts\Auth\Authenticatable  $user
+     * @param  \Illuminate\Contracts\Auth\Authenticatable|null  $user
      * @param  string  $ability
      * @param  array  $arguments
      * @param  mixed  $policy
@@ -605,15 +522,19 @@ class Gate implements GateContract
      * Call the "before" method on the given policy, if applicable.
      *
      * @param  mixed  $policy
-     * @param  \Illuminate\Contracts\Auth\Authenticatable  $user
+     * @param  \Illuminate\Contracts\Auth\Authenticatable|null  $user
      * @param  string  $ability
      * @param  array  $arguments
      * @return mixed
      */
     protected function callPolicyBefore($policy, $user, $ability, $arguments)
     {
-        if (method_exists($policy, 'before') &&
-            (! is_null($user) || $this->methodAllowsGuests($policy, 'before'))) {
+        if (method_exists($policy, 'before')) {
+            if (is_null($user) &&
+                ! $this->callbackAllowsGuests([$policy, 'before'], $ability, ...$arguments)) {
+                return false;
+            }
+
             return $policy->before($user, $ability, ...$arguments);
         }
     }
